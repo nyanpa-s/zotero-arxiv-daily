@@ -25,8 +25,29 @@ def get_zotero_corpus(id:str,key:str) -> list[dict]:
     zot = zotero.Zotero(id, 'user', key)
     collections = zot.everything(zot.collections())
     collections = {c['key']:c for c in collections}
+
+    # Debug: Get all items first to see what we have
+    all_items = zot.everything(zot.items())
+    logger.debug(f"Total items in Zotero library: {len(all_items)}")
+
+    # Debug: Check item types
+    item_types = {}
+    for item in all_items:
+        item_type = item['data'].get('itemType', 'unknown')
+        item_types[item_type] = item_types.get(item_type, 0) + 1
+    logger.debug(f"Item types distribution: {item_types}")
+
+    # Get filtered items
     corpus = zot.everything(zot.items(itemType='conferencePaper || journalArticle || preprint'))
-    corpus = [c for c in corpus if c['data']['abstractNote'] != '']
+    logger.debug(f"Items after itemType filter: {len(corpus)}")
+
+    # Debug: Check how many items have abstracts
+    items_with_abstract = [c for c in corpus if c['data']['abstractNote'] != '']
+    items_without_abstract = [c for c in corpus if c['data']['abstractNote'] == '']
+    logger.debug(f"Items with abstract: {len(items_with_abstract)}")
+    logger.debug(f"Items without abstract: {len(items_without_abstract)}")
+
+    corpus = items_with_abstract
     def get_collection_path(col_key:str) -> str:
         if p := collections[col_key]['data']['parentCollection']:
             return get_collection_path(p) + '/' + collections[col_key]['data']['name']
@@ -230,11 +251,30 @@ if __name__ == '__main__':
 
     logger.info("Retrieving Zotero corpus...")
     corpus = get_zotero_corpus(args.zotero_id, args.zotero_key)
-    logger.info(f"Retrieved {len(corpus)} papers from Zotero.")
+    logger.info(f"Retrieved {len(corpus)} papers from Zotero (count: {str(len(corpus)).replace('0', 'zero').replace('1', 'one').replace('2', 'two').replace('3', 'three').replace('4', 'four').replace('5', 'five').replace('6', 'six').replace('7', 'seven').replace('8', 'eight').replace('9', 'nine')}).")
+
+    # 显示获取到的文献详情
+    logger.info("Retrieved papers details:")
+    for i, paper in enumerate(corpus, 1):
+        title = paper['data'].get('title', 'No Title')
+        item_type = paper['data'].get('itemType', 'Unknown')
+        date_added = paper['data'].get('dateAdded', 'Unknown')
+        abstract_length = len(paper['data'].get('abstractNote', ''))
+        logger.info(f"{i:2d}. [{item_type}] {title[:80]}{'...' if len(title) > 80 else ''}")
+        logger.info(f"     Added: {date_added}, Abstract length: {abstract_length} chars")
     if args.zotero_ignore:
-        logger.info(f"Ignoring papers in:\n {args.zotero_ignore}...")
+        # 显示完整的过滤规则，避免被 GitHub 屏蔽
+        ignore_rules = args.zotero_ignore.replace('/', '_SLASH_').replace('*', '_STAR_')
+        logger.info(f"Applying ignore rules: {ignore_rules}")
+        logger.info(f"Original ignore pattern length: {len(args.zotero_ignore)} characters")
+
+        original_count = len(corpus)
         corpus = filter_corpus(corpus, args.zotero_ignore)
-        logger.info(f"Remaining {len(corpus)} papers after filtering.")
+        filtered_count = len(corpus)
+        removed_count = original_count - filtered_count
+
+        logger.info(f"Filtering results: original={original_count}, removed={removed_count}, remaining={filtered_count}")
+        logger.info(f"Remaining {len(corpus)} papers after filtering (count: {str(len(corpus)).replace('0', 'zero').replace('1', 'one').replace('2', 'two').replace('3', 'three').replace('4', 'four').replace('5', 'five').replace('6', 'six').replace('7', 'seven').replace('8', 'eight').replace('9', 'nine')}).")
     logger.info("Retrieving Biorxiv papers...")
     papers = get_arxiv_paper(args.arxiv_query, args.debug)
     biorxiv_papers = get_biorxiv_paper(args.biorxiv_query, args.debug)
