@@ -21,12 +21,33 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-def get_zotero_corpus(id:str,key:str) -> list[dict]:
+def get_zotero_corpus(id:str,key:str) -> tuple[list[dict], dict]:
     zot = zotero.Zotero(id, 'user', key)
     collections = zot.everything(zot.collections())
     collections = {c['key']:c for c in collections}
+
+    # Get all items for statistics
+    all_items = zot.everything(zot.items())
+    logger.debug(f"Total items in Zotero library: {len(all_items)}")
+
+    # Calculate item types distribution
+    item_types = {}
+    for item in all_items:
+        item_type = item['data'].get('itemType', 'unknown')
+        item_types[item_type] = item_types.get(item_type, 0) + 1
+    logger.debug(f"Item types distribution: {item_types}")
+
+    # Get filtered items
     corpus = zot.everything(zot.items(itemType='conferencePaper || journalArticle || preprint'))
-    corpus = [c for c in corpus if c['data']['abstractNote'] != '']
+    logger.debug(f"Items after itemType filter: {len(corpus)}")
+
+    # Separate items with and without abstracts
+    items_with_abstract = [c for c in corpus if c['data']['abstractNote'] != '']
+    items_without_abstract = [c for c in corpus if c['data']['abstractNote'] == '']
+    logger.debug(f"Items with abstract: {len(items_with_abstract)}")
+    logger.debug(f"Items without abstract: {len(items_without_abstract)}")
+
+    corpus = items_with_abstract
     def get_collection_path(col_key:str) -> str:
         if p := collections[col_key]['data']['parentCollection']:
             return get_collection_path(p) + '/' + collections[col_key]['data']['name']
@@ -35,7 +56,17 @@ def get_zotero_corpus(id:str,key:str) -> list[dict]:
     for c in corpus:
         paths = [get_collection_path(col) for col in c['data']['collections']]
         c['paths'] = paths
-    return corpus
+
+    # Prepare statistics for email
+    stats = {
+        'item_types': item_types,
+        'after_filter': len(corpus) + len(items_without_abstract),
+        'with_abstract': len(items_with_abstract),
+        'without_abstract': len(items_without_abstract),
+        'without_abstract_items': items_without_abstract[:5]  # First 5 items without abstract
+    }
+
+    return corpus, stats
 
 def filter_corpus(corpus:list[dict], pattern:str) -> list[dict]:
     _,filename = mkstemp()
@@ -229,7 +260,7 @@ if __name__ == '__main__':
         logger.add(sys.stdout, level="INFO")
 
     logger.info("Retrieving Zotero corpus...")
-    corpus = get_zotero_corpus(args.zotero_id, args.zotero_key)
+    corpus, zotero_stats = get_zotero_corpus(args.zotero_id, args.zotero_key)
     logger.info(f"Retrieved {len(corpus)} papers from Zotero.")
     if args.zotero_ignore:
         logger.info(f"Ignoring papers in:\n {args.zotero_ignore}...")
@@ -259,7 +290,7 @@ if __name__ == '__main__':
             logger.info("Using Local LLM as global LLM.")
             set_global_llm(lang=args.language)
 
-    html = render_email(papers, biorxiv_papers)
+    html = render_email(papers, biorxiv_papers, zotero_stats, len(papers), len(biorxiv_papers))
     logger.info("Sending email...")
     send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
     logger.success("Email sent successfully! If you don't receive the email, please check the configuration and the junk box.")

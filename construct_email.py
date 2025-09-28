@@ -29,6 +29,25 @@ framework = """
     .full-star {
       vertical-align: middle;
     }
+    .stats-section {
+      background-color: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+      font-family: Arial, sans-serif;
+    }
+    .stats-title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .stats-content {
+      font-size: 14px;
+      color: #666;
+      line-height: 1.6;
+    }
   </style>
 </head>
 <body>
@@ -42,6 +61,8 @@ framework = """
 <div>
     __CONTENT-BIORXIV__
 </div>
+
+__STATS-SECTION__
 
 <br><br>
 <div>
@@ -106,6 +127,34 @@ def get_block_html(title:str, authors:str, rate:str,arxiv_id:str, abstract:str, 
 """
     return block_template.format(title=title, authors=authors,rate=rate,arxiv_id=arxiv_id, abstract=abstract, pdf_url=pdf_url, code=code, affiliations=affiliations)
 
+def get_stats_html(zotero_stats:dict, arxiv_count:int, biorxiv_count:int):
+    if not zotero_stats:
+        return ""
+
+    # Format item types distribution
+    item_types_str = ", ".join([f"{k}: {v}" for k, v in zotero_stats['item_types'].items()])
+
+    # Format items without abstract
+    without_abstract_list = ""
+    if zotero_stats['without_abstract_items']:
+        for i, item in enumerate(zotero_stats['without_abstract_items'], 1):
+            title = item['data'].get('title', 'No Title')
+            item_type = item['data'].get('itemType', 'Unknown')
+            without_abstract_list += f"{i}. [{item_type}] {title}<br>"
+
+    stats_html = f"""
+    <div class="stats-section">
+        <div class="stats-title">Library Statistics</div>
+        <div class="stats-content">
+            <strong>Total Zotero library:</strong> {item_types_str}<br>
+            <strong>After itemType filter:</strong> {zotero_stats['after_filter']}, with abstract: {zotero_stats['with_abstract']}, without abstract: {zotero_stats['without_abstract']}<br>
+            {f"<strong>Items without abstract:</strong><br>{without_abstract_list}" if without_abstract_list else ""}
+            <strong>Retrieved {arxiv_count} papers from Arxiv, {biorxiv_count} papers from Biorxiv</strong>
+        </div>
+    </div>
+    """
+    return stats_html
+
 def get_stars(score:float):
     full_star = '<span class="full-star">⭐</span>'
     half_star = '<span class="half-star">⭐</span>'
@@ -123,7 +172,7 @@ def get_stars(score:float):
         return '<div class="star-wrapper">'+full_star * full_star_num + half_star * half_star_num + '</div>'
 
 
-def render_email(papers:list[ArxivPaper], papers_biorxiv:list[BiorxivPaper]):
+def render_email(papers:list[ArxivPaper], papers_biorxiv:list[BiorxivPaper], zotero_stats:dict=None, arxiv_count:int=0, biorxiv_count:int=0):
     parts = []
     if len(papers) == 0 :
         framework1 = framework.replace('__CONTENT-ARXIV__', get_empty_html())
@@ -149,7 +198,7 @@ def render_email(papers:list[ArxivPaper], papers_biorxiv:list[BiorxivPaper]):
 
     parts = []
     if len(papers_biorxiv) == 0:
-        return framework1.replace('__CONTENT-BIORXIV__', get_empty_html())
+        framework2 = framework1.replace('__CONTENT-BIORXIV__', get_empty_html())
     else:
         for p in tqdm(papers_biorxiv,desc='Rendering Email'):
             rate = get_stars(p.score)
@@ -164,7 +213,11 @@ def render_email(papers:list[ArxivPaper], papers_biorxiv:list[BiorxivPaper]):
             parts.append(get_block_html(p.title, authors,rate,p.biorxiv_id,p.tldr, p.paper_url, p.code_url, affiliations))
 
         content = '<br>' + '</br><br>'.join(parts) + '</br>'
-        return framework1.replace('__CONTENT-BIORXIV__', content)
+        framework2 = framework1.replace('__CONTENT-BIORXIV__', content)
+
+    # Add statistics section
+    stats_html = get_stats_html(zotero_stats, arxiv_count, biorxiv_count)
+    return framework2.replace('__STATS-SECTION__', stats_html)
 
 
 def send_email(sender:str, receiver:str, password:str,smtp_server:str,smtp_port:int, html:str,):
